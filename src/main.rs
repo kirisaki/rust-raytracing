@@ -1,9 +1,11 @@
 use std::{f64::INFINITY, ops::{Add, Div, Mul, Sub}};
+use rand::prelude::*;
 
 fn main() {
     let ratio = 16.0 / 9.0;
     let width: u64 = 384;
     let height: u64 = (width as f64 / ratio) as u64;
+    let samples_per_pixel = 100;
 
     println!("P3");
     println!("{:}", width);
@@ -23,13 +25,20 @@ fn main() {
     world.add(Box::new(Sphere::new(Point::new(0.0, 0.0, -1.0), 0.5)));
     world.add(Box::new(Sphere::new(Point::new(0.0, -100.5, -1.0), 100.0)));
 
+    let cam = Camera::default();
+
     for j in (0..height).rev() {
         for i in 0..width {
             eprint!("\rx:{:5}, y:{:5}", i, j);
-            let u = i as f64 / ((width - 1) as f64);
-            let v = j as f64 / ((height - 1) as f64);
-            let r = Ray{origin: origin, direction: lower_left_corner + horizontal * u + vertical * v - origin};
-            write_color(r.color(&world));
+
+            let mut pixel = Color::new(0.0, 0.0, 0.0);
+            for s in 0..samples_per_pixel {
+                let u = (i as f64 + random::<f64>()) / ((width - 1) as f64);
+                let v = (j as f64 + random::<f64>()) / ((height - 1) as f64);
+                let ray = cam.get_ray(u, v);
+                pixel = pixel + ray.color(&world);
+            }
+            write_color(pixel, samples_per_pixel);
         }
     }
     eprintln!();
@@ -67,9 +76,30 @@ impl World {
     }
 }
 
-fn write_color(color: Color) {
-    let c = color * 255.99;
-    println!("{:.0} {:.0} {:.0}", c.x.floor(), c.y.floor(), c.z.floor())
+fn write_color(color: Color, samples_per_pixel: u64) {
+    let mut r = color.x;
+    let mut g = color.y;
+    let mut b = color.z;
+
+    let scale = 1.0 / (samples_per_pixel as f64);
+    r = r * scale;
+    b = b * scale;
+    g = g * scale;
+    println!( "{:.0} {:.0} {:.0}"
+            , (clamp(r, 0.0, 0.999) * 256.0).floor()
+            , (clamp(g, 0.0, 0.999) * 256.0).floor()
+            , (clamp(b, 0.0, 0.999) * 256.0).floor()
+        )
+}
+
+fn clamp(x: f64, xmin: f64, xmax: f64) -> f64 {
+    if x < xmin {
+        xmin
+    } else if xmax < x {
+        xmax
+    } else {
+        x
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -79,6 +109,9 @@ struct Ray {
 }
 
 impl Ray {
+    fn new(origin: Point, direction: Vec3) -> Self {
+        Ray{origin, direction}
+    }
     fn at(self, t: f64) -> Point {
         self.origin + self.direction * t
     }
@@ -92,6 +125,36 @@ impl Ray {
                 Color::new(1.0, 1.0, 1.0) * (1.0 - t) + Color::new(0.5, 0.7, 1.0) * t
             },
         }
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+struct Camera {
+    origin: Point,
+    lower_left_corner: Point,
+    horizontal: Vec3,
+    vertical: Vec3,
+}
+
+impl Camera {
+    fn new(origin: Point, lower_left_corner: Point, horizontal: Vec3, vertical: Vec3) -> Self {
+        Camera{origin, lower_left_corner, horizontal, vertical}
+    }
+
+    fn default() -> Self {
+        let ratio = 16.0 / 9.0;
+        let height = 2.0;
+        let width = ratio * height;
+        let focal = 1.0;
+        let origin = Point::new(0.0, 0.0, 0.0);
+        let horizontal = Vec3::new(width, 0.0, 0.0);
+        let vertical = Vec3::new(0.0, height, 0.0);
+        let lower_left_corner = origin - horizontal / 2.0 - vertical / 2.0 - Vec3::new(0.0, 0.0, focal);
+        Camera{origin, lower_left_corner, horizontal, vertical}
+    }
+
+    fn get_ray(self, u: f64, v: f64) -> Ray {
+        Ray::new(self.origin, self.lower_left_corner + self.horizontal * u + self.vertical * v - self.origin)
     }
 }
 
