@@ -48,22 +48,29 @@ impl Ray {
     }
 
     fn color(self) -> Color {
-        let e = self.direction.unit();
-        let t = (e.y + 1.0) * 0.5;
-        if hit_sphere(Point{x: 0.0, y: 0.0, z: -1.0}, 0.5, self) {
-            Color{x: 1.0, y: 0.0, z: 0.0}
+        let t = hit_sphere(Point{x: 0.0, y: 0.0, z: -1.0}, 0.5, self);
+        if (t > 0.0) {
+            let n = (self.at(t) - Point{x: 0.0, y: 0.0, z: -1.0}).unit();
+            Color{x: n.x + 1.0, y: n.y + 1.0, z: n.z + 1.0} * 0.5
         } else {
+            let u = self.direction.unit();
+            let t = (u.y + 1.0) * 0.5;
             Color{x: 1.0, y: 1.0, z: 1.0} * (1.0 - t) + Color{x: 0.5, y: 0.7 ,z: 1.0} * t
         }
     }
 }
 
-fn hit_sphere(center: Point, radius: f64, ray: Ray) -> bool {
+fn hit_sphere(center: Point, radius: f64, ray: Ray) -> f64 {
     let oc = ray.origin - center;
     let a = ray.direction.dot(ray.direction);
     let b =2.0 * oc.dot(ray.direction);
     let c = oc.dot(oc) - radius * radius;
-    b * b - 4.0 * a * c > 0.0
+    let d = b * b - 4.0 * a * c;
+    if (d < 0.0) {
+        -1.0
+    } else {
+        (-b - f64::sqrt(d)) / (2.0 * a)
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
