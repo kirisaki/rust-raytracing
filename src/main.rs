@@ -1,4 +1,4 @@
-use std::{f64::{consts::PI, INFINITY}, ops::{Add, Div, Mul, Sub}};
+use std::{cmp::min, f64::{consts::PI, INFINITY}, ops::{Add, Div, Mul, Neg, Sub}};
 use rand::prelude::*;
 
 fn main() {
@@ -25,11 +25,15 @@ fn main() {
     world.add(Box::new(Sphere::new
         ( Point::new(1.0, 0.0, -1.0)
         , 0.5
-        , Material::Metal{albedo: Color::new(0.8, 0.6, 0.2), fuzz: 0.3})));
+        , Material::Metal{albedo: Color::new(0.8, 0.6, 0.2), fuzz: 0.0})));
     world.add(Box::new(Sphere::new
         ( Point::new(-1.0, 0.0, -1.0)
         , 0.5
-        , Material::Metal{albedo: Color::new(0.8, 0.8, 0.8), fuzz: 1.0})));
+        , Material::Dielectric{ref_idx: 1.5})));
+    world.add(Box::new(Sphere::new
+        ( Point::new(-1.0, 0.0, -1.0)
+        , -0.45
+        , Material::Dielectric{ref_idx: 1.5})));
 
     let cam = Camera::default();
 
@@ -239,6 +243,7 @@ impl Hittable for Sphere{
 enum Material {
     Lambertian{albedo: Color},
     Metal{albedo: Color, fuzz: f64},
+    Dielectric{ref_idx: f64},
 }
 
 impl Material {
@@ -250,7 +255,7 @@ impl Material {
                 let attenuation = albedo;
                 Some((scattered, attenuation))
             },
-            Material::Metal{albedo, fuzz} =>{
+            Material::Metal{albedo, fuzz} => {
                 let reflected = rin.direction.unit().reflect(rec.n);
                 let scattered = Ray::new(rec.p, reflected + Vec3::random_in_unit_sphere() * fuzz);
                 let attenuation = albedo;
@@ -260,8 +265,41 @@ impl Material {
                     None
                 }
             },
+            Material::Dielectric{ref_idx} => {
+                let attenuation = Color::new(1.0, 1.0, 1.0);
+                let etai_over_etat = if rec.front_face {
+                    1.0 / ref_idx
+                } else {
+                    ref_idx
+                };
+
+                let unit = rin.direction.unit();
+                let cos_theta = f64::min((unit * (-1.0)).dot(rec.n), 1.0);
+                let sin_theta = (1.0 - cos_theta * cos_theta).sqrt();
+                let scattered = if etai_over_etat * sin_theta > 1.0 {
+                    let reflected = unit.reflect(rec.n);
+                    Ray::new(rec.p, reflected)
+                } else {
+                    let reflected_prob = schlick(cos_theta, etai_over_etat);
+                    if random::<f64>() < reflected_prob {
+                        let reflected = unit.reflect(rec.n);
+                        Ray::new(rec.p, reflected)
+                    } else {
+                        let refracted = unit.refract(rec.n, etai_over_etat);
+                        Ray::new(rec.p, refracted)
+                    }
+                };
+
+                Some((scattered, attenuation))
+            },
         }
     }
+}
+
+fn schlick(cos: f64, ref_idx: f64) -> f64 {
+    let r0 = (1.0 - ref_idx) / (1.0 + ref_idx);
+    let r1 = r0 * r0;
+    r1 + (1.0 - r1) * (1.0 - cos).powi(5)
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -375,5 +413,12 @@ impl Vec3 {
 
     fn reflect(self, n: Vec3) -> Vec3 {
         self - n * self.dot(n) * 2.0
+    }
+
+    fn refract(self, n: Vec3, etai_over_etat: f64) -> Self {
+        let cos_theta = (self * (-1.0)).dot(n);
+        let rout_parallel = (self + n * cos_theta) * etai_over_etat;
+        let rout_prep = n * (1.0 - rout_parallel.norm_squared()).sqrt().neg();
+        rout_parallel + rout_prep
     }
 }
