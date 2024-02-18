@@ -35,12 +35,16 @@ fn main() {
         , -0.45
         , Material::Dielectric{ref_idx: 1.5})));
 
+    let lookfrom = Point::new(3.0, 3.0, 2.0);
+    let lookat = Vec3::new(0.0, 0.0, -1.0);
     let cam = Camera::new
-        ( Point::new(-2.0, 2.0, 1.0)
-        , Point::new(0.0, 0.0, -1.0)
+        ( lookfrom 
+        , lookat
         , Vec3::new(0.0, 1.0, 0.0)
         , 20.0
         , ratio
+        , 2.0
+        , (lookfrom - lookat).norm() 
         );
 
     for j in (0..height).rev() {
@@ -158,10 +162,14 @@ struct Camera {
     lower_left_corner: Point,
     horizontal: Vec3,
     vertical: Vec3,
+    lens_radius: f64,
+    u: Vec3,
+    v: Vec3,
+    w: Vec3,
 }
 
 impl Camera {
-    fn new(lookfrom: Point, lookat: Point, vup: Vec3, vfov: f64, ratio: f64) -> Self {
+    fn new(lookfrom: Point, lookat: Point, vup: Vec3, vfov: f64, ratio: f64, apature: f64, focus_dist: f64) -> Self {
         let theta = vfov.to_radians();
         let h = (theta / 2.0).tan();
         let height = 2.0 * h;
@@ -172,27 +180,20 @@ impl Camera {
         let v = w.cross(u);
 
         let origin = lookfrom;
-        let horizontal = u * width;
-        let vertical = v* height;
-        let lower_left_corner = origin - horizontal / 2.0 - vertical / 2.0 - w;
+        let horizontal = u * width * focus_dist;
+        let vertical = v * height * focus_dist;
+        let lower_left_corner = origin - horizontal / 2.0 - vertical / 2.0 - w * focus_dist;
+        let lens_radius = apature / 2.0;
 
-        Camera{origin, lower_left_corner, horizontal, vertical}
+        Camera{origin, lower_left_corner, horizontal, vertical, lens_radius, u, v, w}
     }
 
-    fn default() -> Self {
-        let ratio = 16.0 / 9.0;
-        let height = 2.0;
-        let width = ratio * height;
-        let focal = 1.0;
-        let origin = Point::new(0.0, 0.0, 0.0);
-        let horizontal = Vec3::new(width, 0.0, 0.0);
-        let vertical = Vec3::new(0.0, height, 0.0);
-        let lower_left_corner = origin - horizontal / 2.0 - vertical / 2.0 - Vec3::new(0.0, 0.0, focal);
-        Camera{origin, lower_left_corner, horizontal, vertical}
-    }
-
-    fn get_ray(self, u: f64, v: f64) -> Ray {
-        Ray::new(self.origin, self.lower_left_corner + self.horizontal * u + self.vertical * v - self.origin)
+    fn get_ray(self, s: f64, t: f64) -> Ray {
+        let rd = Vec3::random_in_unit_disk() * self.lens_radius;
+        let offset = self.u * rd.x + self.v * rd.y;
+        Ray::new
+            ( self.origin + offset
+            , self.lower_left_corner + self.horizontal * s + self.vertical * t - self.origin - offset)
     }
 }
 
@@ -428,6 +429,16 @@ impl Vec3 {
             in_unit_sphere
         } else {
             in_unit_sphere * (-1.0)
+        }
+    }
+
+    fn random_in_unit_disk() -> Self {
+        let mut rng = thread_rng();
+        loop {
+            let p = Vec3::new(rng.gen_range(-1.0..1.0), rng.gen_range(-1.0..1.0), 0.0);
+            if p.norm_squared() < 1.0 {
+                return p;
+            }
         }
     }
 
