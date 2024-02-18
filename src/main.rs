@@ -3,7 +3,7 @@ use rand::prelude::*;
 
 fn main() {
     let ratio = 16.0 / 9.0;
-    let width: u64 = 384;
+    let width: u64 = 1024;
     let height: u64 = (width as f64 / ratio) as u64;
     let samples_per_pixel = 100;
     let max_depth = 50;
@@ -13,38 +13,18 @@ fn main() {
     println!("{:}", height);
     println!("255");
 
-    let mut world: World = World::new();
-    world.add(Box::new(Sphere::new
-        ( Point::new(0.0, 0.0, -1.0)
-        , 0.5
-        , Material::Lambertian{albedo: Color::new(0.7, 0.3, 0.3)})));
-    world.add(Box::new(Sphere::new
-        ( Point::new(0.0, -100.5, -1.0)
-        , 100.0
-        , Material::Lambertian{albedo: Color::new(0.8, 0.8, 0.0)})));
-    world.add(Box::new(Sphere::new
-        ( Point::new(1.0, 0.0, -1.0)
-        , 0.5
-        , Material::Metal{albedo: Color::new(0.8, 0.6, 0.2), fuzz: 0.0})));
-    world.add(Box::new(Sphere::new
-        ( Point::new(-1.0, 0.0, -1.0)
-        , 0.5
-        , Material::Dielectric{ref_idx: 1.5})));
-    world.add(Box::new(Sphere::new
-        ( Point::new(-1.0, 0.0, -1.0)
-        , -0.45
-        , Material::Dielectric{ref_idx: 1.5})));
+    let world: World = World::random_scence();
 
-    let lookfrom = Point::new(3.0, 3.0, 2.0);
-    let lookat = Vec3::new(0.0, 0.0, -1.0);
+    let lookfrom = Point::new(13.0, 2.0, 3.0);
+    let lookat = Vec3::new(0.0, 0.0, 0.0);
     let cam = Camera::new
         ( lookfrom 
         , lookat
         , Vec3::new(0.0, 1.0, 0.0)
         , 20.0
         , ratio
-        , 2.0
-        , (lookfrom - lookat).norm() 
+        , 0.1
+        , 10.0 
         );
 
     for j in (0..height).rev() {
@@ -93,6 +73,59 @@ impl World {
         }
 
         ret
+    }
+
+    fn random_scence() -> Self {
+        let mut rng = thread_rng();
+        let mut world = Self::new();
+        world.add(Box::new(Sphere::new
+            ( Point::new(0.0, -1000.0, 0.0)
+            , 1000.0
+            , Material::Lambertian{albedo: Color::new(0.5, 0.5, 0.5)})));
+
+        for a in -10..=10 {
+            for b in -10..=10 {
+                let choose_mat: f64 = random();
+                let center = Point::new(a as f64 + 0.9 * random::<f64>(), 0.2, b as f64 + 0.9 * random::<f64>());
+
+                if (center - Vec3::new(4.0, 0.2, 0.0)).norm() > 0.9 {
+                    if choose_mat < 0.8 {
+                        let albedo = Color::random(0.0, 1.0);
+                        world.add(Box::new(Sphere::new
+                            ( center
+                            , 0.2
+                            , Material::Lambertian{albedo})));
+                    } else if choose_mat < 0.95 {
+                        let albedo = Color::random(0.5, 1.0);
+                        let fuzz = rng.gen_range(0.5..1.0);
+                        world.add(Box::new(Sphere::new
+                            ( center
+                            , 0.2
+                            , Material::Metal{albedo, fuzz})));
+                    } else {
+                        world.add(Box::new(Sphere::new
+                            ( center
+                            , 0.2
+                            , Material::Dielectric{ref_idx: 1.5})));
+                    }
+                }
+            }
+        }
+
+        world.add(Box::new(Sphere::new
+            ( Point::new(0.0, 1.0, 0.0)
+            , 1.0
+            , Material::Dielectric{ref_idx: 1.5})));
+        world.add(Box::new(Sphere::new
+            ( Point::new(-4.0, 1.0, 0.0)
+            , 1.0
+            , Material::Lambertian {albedo: Color::new(0.4, 0.2, 0.1)})));
+        world.add(Box::new(Sphere::new
+            ( Point::new(4.0, 1.0, 0.0)
+            , 1.0
+            , Material::Metal{albedo: Color::new(0.7, 0.6, 0.5), fuzz: 0.0})));
+        
+        world
     }
 }
 
