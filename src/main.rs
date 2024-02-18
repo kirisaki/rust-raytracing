@@ -35,7 +35,13 @@ fn main() {
         , -0.45
         , Material::Dielectric{ref_idx: 1.5})));
 
-    let cam = Camera::default();
+    let cam = Camera::new
+        ( Point::new(-2.0, 2.0, 1.0)
+        , Point::new(0.0, 0.0, -1.0)
+        , Vec3::new(0.0, 1.0, 0.0)
+        , 20.0
+        , ratio
+        );
 
     for j in (0..height).rev() {
         for i in 0..width {
@@ -155,7 +161,21 @@ struct Camera {
 }
 
 impl Camera {
-    fn new(origin: Point, lower_left_corner: Point, horizontal: Vec3, vertical: Vec3) -> Self {
+    fn new(lookfrom: Point, lookat: Point, vup: Vec3, vfov: f64, ratio: f64) -> Self {
+        let theta = vfov.to_radians();
+        let h = (theta / 2.0).tan();
+        let height = 2.0 * h;
+        let width = ratio * height;
+ 
+        let w = (lookfrom - lookat).unit();
+        let u = vup.cross(w).unit();
+        let v = w.cross(u);
+
+        let origin = lookfrom;
+        let horizontal = u * width;
+        let vertical = v* height;
+        let lower_left_corner = origin - horizontal / 2.0 - vertical / 2.0 - w;
+
         Camera{origin, lower_left_corner, horizontal, vertical}
     }
 
