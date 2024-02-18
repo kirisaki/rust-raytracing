@@ -1,4 +1,4 @@
-use std::{f64::INFINITY, ops::{Add, Div, Mul, Sub}};
+use std::{f64::{consts::PI, INFINITY}, ops::{Add, Div, Mul, Sub}};
 use rand::prelude::*;
 
 fn main() {
@@ -6,24 +6,30 @@ fn main() {
     let width: u64 = 384;
     let height: u64 = (width as f64 / ratio) as u64;
     let samples_per_pixel = 100;
+    let max_depth = 50;
 
     println!("P3");
     println!("{:}", width);
     println!("{:}", height);
     println!("255");
 
-    let v_height = 2.0;
-    let v_width = ratio * v_height;
-    let focal_length = 1.0;
-
-    let origin = Point{x: 0.0, y: 0.0, z: 0.0};
-    let horizontal = Point{x: v_width, y: 0.0, z: 0.0};
-    let vertical = Point{x: 0.0, y: v_height, z: 0.0};
-    let lower_left_corner = origin - horizontal / 2.0 - vertical / 2.0 - Point{x: 0.0, y: 0.0, z: focal_length};
-
     let mut world: World = World::new();
-    world.add(Box::new(Sphere::new(Point::new(0.0, 0.0, -1.0), 0.5)));
-    world.add(Box::new(Sphere::new(Point::new(0.0, -100.5, -1.0), 100.0)));
+    world.add(Box::new(Sphere::new
+        ( Point::new(0.0, 0.0, -1.0)
+        , 0.5
+        , Material::Lambertian{albedo: Color::new(0.7, 0.3, 0.3)})));
+    world.add(Box::new(Sphere::new
+        ( Point::new(0.0, -100.5, -1.0)
+        , 100.0
+        , Material::Lambertian{albedo: Color::new(0.8, 0.8, 0.0)})));
+    world.add(Box::new(Sphere::new
+        ( Point::new(1.0, 0.0, -1.0)
+        , 0.5
+        , Material::Metal{albedo: Color::new(0.8, 0.6, 0.2), fuzz: 0.3})));
+    world.add(Box::new(Sphere::new
+        ( Point::new(-1.0, 0.0, -1.0)
+        , 0.5
+        , Material::Metal{albedo: Color::new(0.8, 0.8, 0.8), fuzz: 1.0})));
 
     let cam = Camera::default();
 
@@ -32,11 +38,11 @@ fn main() {
             eprint!("\rx:{:5}, y:{:5}", i, j);
 
             let mut pixel = Color::new(0.0, 0.0, 0.0);
-            for s in 0..samples_per_pixel {
+            for _ in 0..samples_per_pixel {
                 let u = (i as f64 + random::<f64>()) / ((width - 1) as f64);
                 let v = (j as f64 + random::<f64>()) / ((height - 1) as f64);
                 let ray = cam.get_ray(u, v);
-                pixel = pixel + ray.color(&world);
+                pixel = pixel + ray.color(&world, max_depth);
             }
             write_color(pixel, samples_per_pixel);
         }
@@ -60,19 +66,19 @@ impl World {
 
     fn hit(&self, ray: Ray, tmin: f64, tmax: f64) -> Option<HitRecord> {
         let mut closest_so_far = tmax;
-        let mut ret_rec: Option<HitRecord> = None;
+        let mut ret: Option<HitRecord> = None;
 
         for object in &self.objects {
             match object.hit(ray, tmin, closest_so_far) {
                 Some (rec) => {
                     closest_so_far = rec.t;
-                    ret_rec = Some(rec);
+                    ret = Some(rec);
                 },
                 None => (),
             }
         }
 
-        ret_rec
+        ret
     }
 }
 
@@ -82,9 +88,9 @@ fn write_color(color: Color, samples_per_pixel: u64) {
     let mut b = color.z;
 
     let scale = 1.0 / (samples_per_pixel as f64);
-    r = r * scale;
-    b = b * scale;
-    g = g * scale;
+    r = (r * scale).sqrt();
+    b = (b * scale).sqrt();
+    g = (g * scale).sqrt();
     println!( "{:.0} {:.0} {:.0}"
             , (clamp(r, 0.0, 0.999) * 256.0).floor()
             , (clamp(g, 0.0, 0.999) * 256.0).floor()
@@ -116,9 +122,17 @@ impl Ray {
         self.origin + self.direction * t
     }
 
-    fn color(self, world: &World) -> Color {
-        match world.hit(self, 0.0, INFINITY) {
-            Some(rec) => (Color::new(1.0, 1.0, 1.0) + rec.n) * 0.5,
+    fn color(self, world: &World, depth: i64) -> Color {
+        if depth <= 0 {
+            return Color::new(0.0, 0.0, 0.0);
+        }
+        match world.hit(self, 0.0001, INFINITY) {
+            Some(rec) => {
+                match rec.material.scatter(self, &rec) {
+                    Some((scattered, attenuation)) => scattered.color(world, depth - 1) * attenuation,
+                    None => Color::new(0.0, 0.0, 0.0),
+                }
+            },
             None => {
                 let u = self.direction.unit();
                 let t = (u.y + 1.0) * 0.5;
@@ -158,19 +172,19 @@ impl Camera {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq)]
 struct HitRecord {
     p: Point,
     n: Vec3,
     t: f64,
+    material: Material,
     front_face: bool,
 }
 
 impl HitRecord {
-    fn new(ray: Ray, p: Point, out_n: Vec3, t: f64) -> Self {
+    fn new(ray: Ray, p: Point, out_n: Vec3, t: f64, material: Material) -> Self {
         let front_face = ray.direction.dot(out_n) < 0.0;
         let n = if front_face { out_n } else { out_n * (-1.0) };
-        HitRecord{p, n, t, front_face}
+        HitRecord{p, n, t, material, front_face}
     }
 }
 
@@ -181,11 +195,12 @@ trait Hittable {
 struct Sphere {
     center: Point,
     radius: f64,
+    material: Material,
 }
 
 impl Sphere {
-    fn new(center: Point, radius: f64) -> Self {
-        Sphere{center, radius}
+    fn new(center: Point, radius: f64, material: Material) -> Self {
+        Sphere{center, radius, material}
     }
 }
 
@@ -205,12 +220,12 @@ impl Hittable for Sphere{
                 let t = tminus;
                 let p = ray.at(t);
                 let n = (p - self.center) / self.radius;
-                Some(HitRecord::new(ray, p, n, t))
+                Some(HitRecord::new(ray, p, n, t, self.material))
             } else if tmin < tplus && tplus < tmax {
                 let t = tplus;
                 let p = ray.at(t);
                 let n = (p - self.center) / self.radius;
-                Some(HitRecord::new(ray, p, n, t))
+                Some(HitRecord::new(ray, p, n, t, self.material))
             } else {
                 None
             }
@@ -220,17 +235,40 @@ impl Hittable for Sphere{
     }
 }
 
+#[derive(Debug, Copy, Clone)]
+enum Material {
+    Lambertian{albedo: Color},
+    Metal{albedo: Color, fuzz: f64},
+}
+
+impl Material {
+    fn scatter(self, rin: Ray, rec: &HitRecord) -> Option<(Ray, Color)> {
+        match self {
+            Material::Lambertian{albedo} => {
+                let scatter_direction = rec.n + Vec3::random_unit();
+                let scattered = Ray::new(rec.p, scatter_direction);
+                let attenuation = albedo;
+                Some((scattered, attenuation))
+            },
+            Material::Metal{albedo, fuzz} =>{
+                let reflected = rin.direction.unit().reflect(rec.n);
+                let scattered = Ray::new(rec.p, reflected + Vec3::random_in_unit_sphere() * fuzz);
+                let attenuation = albedo;
+                if scattered.direction.dot(rec.n) > 0.0 {
+                    Some((scattered, attenuation))
+                } else {
+                    None
+                }
+            },
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq)]
 struct Vec3 {
     x: f64,
     y: f64,
     z: f64,
-}
-
-impl Vec3 {
-    fn new(x: f64, y: f64, z: f64) -> Self {
-        Vec3{x, y, z}
-    }
 }
 
 type Color = Vec3;
@@ -252,6 +290,14 @@ impl Sub for Vec3 {
     }
 }
 
+impl Mul<Vec3> for Vec3 {
+    type Output = Self;
+
+    fn mul(self, v: Vec3) -> Vec3 {
+        Vec3::new(self.x * v.x, self.y * v.y, self.z * v.z)
+    }
+}
+
 impl Mul<f64> for Vec3 {
     type Output = Self;
 
@@ -269,15 +315,65 @@ impl Div<f64> for Vec3 {
 }
 
 impl Vec3 {
-    fn norm(self) -> f64 {
-        f64::sqrt(self.dot(self))
+    fn new(x: f64, y: f64, z: f64) -> Self {
+        Vec3{x, y, z}
     }
 
-    fn dot(self, other: Self) -> f64{
+    fn norm(self) -> f64 {
+        self.dot(self).abs().sqrt()
+    }
+
+    fn norm_squared(self) -> f64 {
+        self.dot(self).abs()
+    }
+
+    fn dot(self, other: Self) -> f64 {
         self.x * other.x + self.y * other.y + self.z * other.z
+    }
+
+    fn cross(self, other: Self) -> Self {
+        Self::new( self.y * other.z - self.z * other.y
+                 , self.z * other.x - self.x * other.z
+                 , self.x * other.y - self.y * other.x
+                )
     }
 
     fn unit(self) -> Self {
         self / self.norm()
+    }
+
+    fn random(min: f64, max: f64) -> Self {
+        let mut rng = thread_rng();
+        Self::new(rng.gen_range(min..max) , rng.gen_range(min..max), rng.gen_range(min..max))
+    }
+
+    fn random_in_unit_sphere() -> Self {
+        loop {
+            let p = Self::random(-1.0, 1.0);
+            if p.norm_squared() < 1.0 {
+                return p;
+            }
+        }
+    }
+
+    fn random_unit() -> Self {
+        let mut rng = thread_rng();
+        let a: f64 = rng.gen_range(0.0..(2.0 * PI));
+        let z: f64 = rng.gen_range(-1.0..1.0);
+        let r: f64 = (1.0 - z * z).sqrt();
+        Self::new(r*a.cos(), r*a.sin(), z)
+    }
+
+    fn random_in_hemisphere(self) -> Self {
+        let in_unit_sphere = Self:: random_in_unit_sphere();
+        if in_unit_sphere.dot(self) > 0.0 {
+            in_unit_sphere
+        } else {
+            in_unit_sphere * (-1.0)
+        }
+    }
+
+    fn reflect(self, n: Vec3) -> Vec3 {
+        self - n * self.dot(n) * 2.0
     }
 }
