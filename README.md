@@ -8,4 +8,4 @@ Implimentation of [Ray Tracing in One Weekend Series](https://raytracing.github.
 
 ## License
 
-This code is under the [BSD Zero Clause License](LISENCE)
+This code is under the [BSD Zero Clause License](LICENSE)
